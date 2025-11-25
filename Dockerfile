@@ -7,9 +7,7 @@ FROM python:3.11-slim-bullseye
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
-    # Playwright/Crawl4AI settings
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    # App settings
     PORT=8000 \
     WORKERS=2 \
     MAX_UPLOAD_SIZE=100 \
@@ -17,30 +15,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    # Tesseract OCR + languages
     tesseract-ocr \
-    tesseract-ocr-eng \
-    tesseract-ocr-fra \
-    tesseract-ocr-deu \
-    tesseract-ocr-spa \
-    tesseract-ocr-ara \
-    tesseract-ocr-chi-sim \
-    # Image processing
+    tesseract-ocr-eng tesseract-ocr-fra tesseract-ocr-deu tesseract-ocr-spa tesseract-ocr-ara tesseract-ocr-chi-sim \
     libtesseract-dev \
     libleptonica-dev \
     poppler-utils \
     libpoppler-cpp-dev \
-    # FFmpeg (full build)
     ffmpeg \
-    # Web scraping dependencies
     wget \
     curl \
     ca-certificates \
-    # Build tools
     gcc \
     g++ \
     make \
-    # Cleanup
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -49,11 +36,12 @@ WORKDIR /app
 RUN mkdir -p storage/uploads storage/outputs storage/temp && \
     chmod -R 777 storage
 
-# Copy requirements first (better caching)
+# Copy requirements and upgrade pip first
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --use-feature=fast-deps -r requirements.txt
 
-# Install Playwright browsers (Chromium only for efficiency)
+# Install Playwright browsers (Chromium only)
 RUN playwright install chromium && \
     playwright install-deps chromium
 
