@@ -1,32 +1,26 @@
-# Web Framework
+# Crawl4AI stack
+crawl4ai==0.3.75           # Fixed for BrowserConfig import
+playwright>=1.47,<1.48     # Matches crawl4ai
+Pillow~=10.4               # Matches crawl4ai
+aiofiles~=24.0             # Matches crawl4ai
+lxml~=5.3
+
+# Web framework
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
-# Crawl4AI (raw scraping)
-crawl4ai==0.3.74
-playwright>=1.47,<1.48
+# Other dependencies
 beautifulsoup4==4.12.3
-lxml~=5.3
-
-# OCR
 pytesseract==0.3.10
-Pillow~=10.4
 pdf2image==1.17.0
 pillow-heif==0.15.0
-
-# PDF Generation
 reportlab==4.0.9
 weasyprint==60.2
 markdown==3.5.2
 PyPDF2==3.0.1
 img2pdf==0.5.1
-
-# FFmpeg wrapper
 ffmpeg-python==0.2.0
-
-# Utilities
-aiofiles~=24.0
 python-magic==0.4.27
 httpx==0.26.0
 pydantic==2.5.3
