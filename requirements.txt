@@ -3,8 +3,8 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
-# Crawl4AI (raw scraping) - Use older stable version
-crawl4ai==0.2.77
+# Crawl4AI - Use latest stable
+crawl4ai==0.3.74
 playwright==1.40.0
 beautifulsoup4==4.12.3
 lxml==5.1.0
