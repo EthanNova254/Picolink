@@ -1,6 +1,6 @@
 """
 Crawl4AI service - Raw web scraping without AI enhancement
-Using simplified API compatible with version 0.2.77
+Compatible with crawl4ai 0.3.74+ without BrowserConfig
 """
 import asyncio
 from typing import Dict, List, Optional
@@ -9,25 +9,20 @@ from bs4 import BeautifulSoup
 from app.config import settings
 
 class CrawlerService:
-    """Raw web scraping service using Crawl4AI"""
+    """Raw web scraping service using Crawl4AI - simplified API"""
     
     async def scrape_simple(self, url: str) -> Dict:
         """Simple scrape - returns cleaned text"""
         try:
             async with AsyncWebCrawler(verbose=False) as crawler:
-                result = await crawler.arun(
-                    url=url,
-                    bypass_cache=True,
-                    word_count_threshold=10,
-                    timeout=settings.CRAWL_TIMEOUT
-                )
+                result = await crawler.arun(url=url)
                 
                 return {
                     "url": url,
                     "success": result.success,
                     "text": result.markdown if result.success else None,
                     "title": self._extract_title(result.html) if result.success and result.html else None,
-                    "error": result.error_message if not result.success else None
+                    "error": str(result.error_message) if not result.success else None
                 }
         except Exception as e:
             return {
@@ -40,17 +35,13 @@ class CrawlerService:
         """Fetch raw HTML"""
         try:
             async with AsyncWebCrawler(verbose=False) as crawler:
-                result = await crawler.arun(
-                    url=url,
-                    bypass_cache=True,
-                    timeout=settings.CRAWL_TIMEOUT
-                )
+                result = await crawler.arun(url=url)
                 
                 return {
                     "url": url,
                     "success": result.success,
                     "html": result.html if result.success else None,
-                    "error": result.error_message if not result.success else None
+                    "error": str(result.error_message) if not result.success else None
                 }
         except Exception as e:
             return {
@@ -63,17 +54,13 @@ class CrawlerService:
         """Fetch plain text only"""
         try:
             async with AsyncWebCrawler(verbose=False) as crawler:
-                result = await crawler.arun(
-                    url=url,
-                    bypass_cache=True,
-                    timeout=settings.CRAWL_TIMEOUT
-                )
+                result = await crawler.arun(url=url)
                 
                 return {
                     "url": url,
                     "success": result.success,
                     "text": result.markdown if result.success else None,
-                    "error": result.error_message if not result.success else None
+                    "error": str(result.error_message) if not result.success else None
                 }
         except Exception as e:
             return {
@@ -86,28 +73,34 @@ class CrawlerService:
         """Extract page metadata"""
         try:
             async with AsyncWebCrawler(verbose=False) as crawler:
-                result = await crawler.arun(
-                    url=url,
-                    bypass_cache=True,
-                    timeout=settings.CRAWL_TIMEOUT
-                )
+                result = await crawler.arun(url=url)
                 
                 if not result.success:
                     return {
                         "url": url,
                         "success": False,
-                        "error": result.error_message
+                        "error": str(result.error_message)
                     }
                 
                 soup = BeautifulSoup(result.html, 'lxml')
                 
-                # Extract links
+                # Extract links from HTML directly
+                all_links = [a.get('href') for a in soup.find_all('a', href=True)]
+                from urllib.parse import urljoin, urlparse
+                
+                base_domain = urlparse(url).netloc
                 internal_links = []
                 external_links = []
                 
-                if hasattr(result, 'links') and result.links:
-                    internal_links = result.links.get("internal", [])[:10]
-                    external_links = result.links.get("external", [])[:10]
+                for link in all_links[:50]:  # Limit to first 50
+                    try:
+                        full_url = urljoin(url, link)
+                        if urlparse(full_url).netloc == base_domain:
+                            internal_links.append(full_url)
+                        else:
+                            external_links.append(full_url)
+                    except:
+                        continue
                 
                 return {
                     "url": url,
@@ -122,8 +115,8 @@ class CrawlerService:
                         "og_image": self._get_meta_property(soup, "og:image"),
                     },
                     "links_count": len(internal_links) + len(external_links),
-                    "internal_links": internal_links,
-                    "external_links": external_links
+                    "internal_links": internal_links[:10],
+                    "external_links": external_links[:10]
                 }
         except Exception as e:
             return {
@@ -148,6 +141,9 @@ class CrawlerService:
         results = []
         to_visit = [url]
         
+        from urllib.parse import urljoin, urlparse
+        base_domain = urlparse(url).netloc if same_domain_only else None
+        
         try:
             async with AsyncWebCrawler(verbose=False) as crawler:
                 while to_visit and len(visited) < max_pages:
@@ -159,11 +155,7 @@ class CrawlerService:
                     visited.add(current_url)
                     
                     try:
-                        result = await crawler.arun(
-                            url=current_url,
-                            bypass_cache=True,
-                            timeout=settings.CRAWL_TIMEOUT
-                        )
+                        result = await crawler.arun(url=current_url)
                         
                         if result.success:
                             results.append({
@@ -172,10 +164,16 @@ class CrawlerService:
                                 "text": result.markdown[:1000] if result.markdown else "",
                             })
                             
-                            # Add internal links to queue
-                            if same_domain_only and hasattr(result, 'links') and result.links:
-                                internal = result.links.get("internal", [])
-                                to_visit.extend([link for link in internal if link not in visited])
+                            # Extract links from HTML
+                            if same_domain_only:
+                                soup = BeautifulSoup(result.html, 'lxml')
+                                for a in soup.find_all('a', href=True):
+                                    try:
+                                        link = urljoin(current_url, a.get('href'))
+                                        if urlparse(link).netloc == base_domain and link not in visited:
+                                            to_visit.append(link)
+                                    except:
+                                        continue
                     except Exception:
                         continue
             
