@@ -1,6 +1,6 @@
 """
 Simple web scraping service using requests + BeautifulSoup
-No Playwright, no Crawl4AI - just basic HTTP requests
+No Playwright, no Crawl4AI - works on any platform
 """
 import requests
 from typing import Dict, List, Optional
@@ -44,6 +44,8 @@ class CrawlerService:
             return {
                 "url": url,
                 "success": False,
+                "text": None,
+                "title": None,
                 "error": str(e)
             }
     
@@ -63,6 +65,7 @@ class CrawlerService:
             return {
                 "url": url,
                 "success": False,
+                "html": None,
                 "error": str(e)
             }
     
