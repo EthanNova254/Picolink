@@ -1,5 +1,5 @@
-# Minimal production build - No Playwright, No Crawl4AI
-# OCR + PDF + FFmpeg only - 100% stable
+# Production-ready all-in-one API service
+# Compatible with Render, Koyeb - NO Playwright/Crawl4AI
 
 FROM python:3.11-slim-bullseye
 
@@ -11,13 +11,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MAX_UPLOAD_SIZE=100 \
     CLEANUP_HOURS=24
 
-# Install system dependencies (no Playwright deps)
+# Install system dependencies (NO Playwright)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
     tesseract-ocr-fra \
     tesseract-ocr-deu \
     tesseract-ocr-spa \
+    tesseract-ocr-ara \
+    tesseract-ocr-chi-sim \
     libtesseract-dev \
     libleptonica-dev \
     poppler-utils \
