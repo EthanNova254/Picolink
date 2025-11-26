@@ -1,5 +1,5 @@
 # Production-ready all-in-one API service
-# Compatible with Render, Koyeb - NO Playwright/Crawl4AI
+# Compatible with Render, Koyeb - Stable build
 
 FROM python:3.11-slim-bullseye
 
@@ -11,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MAX_UPLOAD_SIZE=100 \
     CLEANUP_HOURS=24
 
-# Install system dependencies (NO Playwright)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
@@ -31,6 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     make \
+    libmagic1 \
+    file \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
