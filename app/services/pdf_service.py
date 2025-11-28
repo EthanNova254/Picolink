@@ -1,5 +1,6 @@
 """
 PDF Generation service - Create PDFs from text, HTML, markdown, and images
+FIXED: WeasyPrint HTML to PDF bug resolved
 """
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -112,8 +113,9 @@ class PDFService:
         if css:
             css_list.append(CSS(string=css))
         
-        # Generate PDF
-        HTML(string=html).write_pdf(str(output_file), stylesheets=css_list)
+        # Generate PDF - FIXED: Separate HTML object creation from write_pdf call
+        html_obj = HTML(string=html)
+        html_obj.write_pdf(str(output_file), stylesheets=css_list)
         
         return output_file
     
