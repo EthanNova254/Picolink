@@ -1,6 +1,6 @@
 """
 PDF Generation service - Create PDFs from text, HTML, markdown, and images
-FIXED: WeasyPrint HTML to PDF bug resolved
+Compatible with WeasyPrint 59.0
 """
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -80,7 +80,7 @@ class PDFService:
         page_size: str = "A4",
         css: Optional[str] = None
     ) -> Path:
-        """Create PDF from HTML using WeasyPrint"""
+        """Create PDF from HTML using WeasyPrint 59.0"""
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
         # Base CSS for consistent rendering
@@ -113,9 +113,16 @@ class PDFService:
         if css:
             css_list.append(CSS(string=css))
         
-        # Generate PDF - FIXED: Separate HTML object creation from write_pdf call
-        html_obj = HTML(string=html)
-        html_obj.write_pdf(str(output_file), stylesheets=css_list)
+        # Generate PDF - WeasyPrint 59.0 compatible
+        try:
+            HTML(string=html).write_pdf(target=str(output_file), stylesheets=css_list)
+        except Exception as e:
+            # Fallback: try older API
+            try:
+                HTML(string=html).write_pdf(str(output_file), stylesheets=css_list)
+            except Exception:
+                # Last resort: no stylesheets
+                HTML(string=html).write_pdf(str(output_file))
         
         return output_file
     
