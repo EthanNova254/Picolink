@@ -1,6 +1,6 @@
 """
 PDF Generation service - Create PDFs from text, HTML, markdown, and images
-Compatible with WeasyPrint 59.0
+Using xhtml2pdf (more stable than WeasyPrint)
 """
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -11,7 +11,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
-from weasyprint import HTML, CSS
+from xhtml2pdf import pisa
 import img2pdf
 from PyPDF2 import PdfMerger
 from app.config import settings
@@ -80,49 +80,73 @@ class PDFService:
         page_size: str = "A4",
         css: Optional[str] = None
     ) -> Path:
-        """Create PDF from HTML using WeasyPrint 59.0"""
+        """Create PDF from HTML using xhtml2pdf"""
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
-        # Base CSS for consistent rendering
-        base_css = """
-        @page {
-            size: %s;
-            margin: 1cm;
-        }
-        body {
-            font-family: 'DejaVu Sans', sans-serif;
-            font-size: 11pt;
-            line-height: 1.5;
-        }
-        h1 { font-size: 20pt; margin-top: 0; }
-        h2 { font-size: 16pt; }
-        h3 { font-size: 14pt; }
-        code { 
-            background: #f4f4f4; 
-            padding: 2px 4px;
-            font-family: monospace;
-        }
-        pre {
-            background: #f4f4f4;
-            padding: 10px;
-            overflow-x: auto;
-        }
+        # Add default CSS if not provided
+        default_css = """
+        <style>
+            @page {
+                size: %s;
+                margin: 1cm;
+            }
+            body {
+                font-family: 'DejaVu Sans', Arial, sans-serif;
+                font-size: 11pt;
+                line-height: 1.5;
+                color: #333;
+            }
+            h1 { font-size: 20pt; margin-top: 0; color: #000; }
+            h2 { font-size: 16pt; color: #333; }
+            h3 { font-size: 14pt; color: #555; }
+            p { margin: 10px 0; }
+            code { 
+                background: #f4f4f4; 
+                padding: 2px 4px;
+                font-family: monospace;
+                font-size: 10pt;
+            }
+            pre {
+                background: #f4f4f4;
+                padding: 10px;
+                overflow-x: auto;
+                font-size: 9pt;
+            }
+        </style>
         """ % page_size
         
-        css_list = [CSS(string=base_css)]
-        if css:
-            css_list.append(CSS(string=css))
+        # Ensure HTML has proper structure
+        if not html.strip().startswith('<!DOCTYPE') and not html.strip().startswith('<html'):
+            html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                {default_css}
+                {f'<style>{css}</style>' if css else ''}
+            </head>
+            <body>
+                {html}
+            </body>
+            </html>
+            """
+        else:
+            # Insert styles into existing HTML
+            if '<head>' in html:
+                html = html.replace('<head>', f'<head>{default_css}' + (f'<style>{css}</style>' if css else ''))
+            else:
+                html = html.replace('<html>', f'<html><head>{default_css}' + (f'<style>{css}</style>' if css else '') + '</head>')
         
-        # Generate PDF - WeasyPrint 59.0 compatible
-        try:
-            HTML(string=html).write_pdf(target=str(output_file), stylesheets=css_list)
-        except Exception as e:
-            # Fallback: try older API
-            try:
-                HTML(string=html).write_pdf(str(output_file), stylesheets=css_list)
-            except Exception:
-                # Last resort: no stylesheets
-                HTML(string=html).write_pdf(str(output_file))
+        # Generate PDF
+        with open(output_file, "wb") as pdf_file:
+            pisa_status = pisa.CreatePDF(
+                html.encode('utf-8'),
+                dest=pdf_file,
+                encoding='utf-8'
+            )
+        
+        if pisa_status.err:
+            raise Exception(f"PDF generation failed: {pisa_status.err}")
         
         return output_file
     
