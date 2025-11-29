@@ -1,11 +1,10 @@
 """
-PDF Generation service - Create PDFs from text, HTML, markdown, and images
-SMART FALLBACK: Tries to preserve HTML+CSS, falls back to extraction if needed
+PDF Generation service - UPGRADED for modern HTML/CSS
+Using WeasyPrint 62.3 with full CSS3 support
 """
 from pathlib import Path
 from typing import List, Optional, Dict
 import markdown
-import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4, letter, legal
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -13,7 +12,7 @@ from reportlab.lib.units import inch, mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.lib.colors import HexColor
-from xhtml2pdf import pisa
+from weasyprint import HTML, CSS
 from bs4 import BeautifulSoup
 import img2pdf
 from PyPDF2 import PdfMerger
@@ -21,7 +20,7 @@ from app.config import settings
 from app.utils import generate_filename
 
 class PDFService:
-    """Local PDF generation service"""
+    """Local PDF generation service with modern CSS support"""
     
     def __init__(self):
         self.page_sizes = {
@@ -39,13 +38,9 @@ class PDFService:
         page_size: str = "A4",
         title: Optional[str] = None
     ) -> Path:
-        """
-        Create PDF from plain text
-        Styles: default, formal, casual, code
-        """
+        """Create PDF from plain text"""
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
-        # Setup document
         page = self.page_sizes.get(page_size, self.default_page_size)
         doc = SimpleDocTemplate(
             str(output_file),
@@ -56,25 +51,20 @@ class PDFService:
             bottomMargin=self.margin
         )
         
-        # Build content
         story = []
         styles = self._get_styles(style)
         
-        # Add title if provided
         if title:
             story.append(Paragraph(title, styles['title']))
             story.append(Spacer(1, 0.3 * inch))
         
-        # Add paragraphs
         paragraphs = text.split('\n\n')
         for para in paragraphs:
             if para.strip():
                 story.append(Paragraph(para, styles['body']))
                 story.append(Spacer(1, 0.2 * inch))
         
-        # Build PDF
         doc.build(story)
-        
         return output_file
     
     def create_from_html(
@@ -84,129 +74,42 @@ class PDFService:
         css: Optional[str] = None
     ) -> Path:
         """
-        Create PDF from HTML - SMART FALLBACK APPROACH
-        1. First: Try to render HTML+CSS with xhtml2pdf (preserves your styling)
-        2. Fallback: If that fails, extract content and style with ReportLab
+        Create PDF from HTML - WeasyPrint 62.3 with FULL CSS3 support
+        Supports: flexbox, gradients, transforms, modern CSS!
         """
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
-        # Prepare HTML with proper structure
-        prepared_html = self._prepare_html_for_pdf(html, page_size, css)
-        
-        # ATTEMPT 1: Try xhtml2pdf (preserves your HTML+CSS)
         try:
-            with open(output_file, "wb") as pdf_file:
-                pisa_status = pisa.CreatePDF(
-                    src=prepared_html,
-                    dest=pdf_file,
-                    encoding='utf-8'
-                )
+            # Prepare CSS list
+            stylesheets = []
+            if css:
+                stylesheets.append(CSS(string=css))
             
-            # Check if PDF was created successfully and has content
-            if output_file.exists() and output_file.stat().st_size > 1000:
-                # PDF created successfully with content
-                print(f"✅ PDF created with xhtml2pdf (preserved HTML+CSS)")
+            # Create PDF with WeasyPrint 62.3 (modern API)
+            html_doc = HTML(string=html)
+            html_doc.write_pdf(
+                target=str(output_file),
+                stylesheets=stylesheets
+            )
+            
+            # Check if PDF was created successfully
+            if output_file.exists() and output_file.stat().st_size > 100:
                 return output_file
             else:
-                # PDF too small or failed
-                print(f"⚠️ xhtml2pdf produced small/empty PDF, trying fallback...")
-                raise Exception("PDF too small")
+                raise Exception("PDF generation produced empty file")
                 
         except Exception as e:
-            print(f"⚠️ xhtml2pdf failed: {str(e)}, using fallback renderer...")
-            
-            # ATTEMPT 2: Fallback to ReportLab extraction (clean styling)
+            print(f"⚠️ WeasyPrint error: {str(e)}")
+            # Fallback to ReportLab extraction
             return self._create_pdf_from_html_fallback(html, page_size, output_file)
-    
-    def _prepare_html_for_pdf(self, html: str, page_size: str, custom_css: Optional[str]) -> str:
-        """Prepare HTML with proper structure for xhtml2pdf"""
-        
-        # Simplified CSS that xhtml2pdf can handle better
-        safe_css = """
-        <style type="text/css">
-            @page {
-                size: %s;
-                margin: 2cm;
-            }
-            body {
-                font-family: Arial, Helvetica, sans-serif;
-                font-size: 11pt;
-                line-height: 1.5;
-                color: #333;
-            }
-            h1, h2, h3 {
-                color: #2c3e50;
-                text-align: center;
-                margin: 10px 0;
-            }
-            h1 { font-size: 24pt; }
-            h2 { font-size: 18pt; }
-            h3 { font-size: 14pt; }
-            p {
-                margin: 10px 0;
-                text-align: center;
-                color: #34495e;
-            }
-            .title {
-                font-size: 28pt;
-                font-weight: bold;
-                text-align: center;
-                color: #2c3e50;
-                margin: 20px 0;
-            }
-            .age-range {
-                font-size: 14pt;
-                text-align: center;
-                color: #7b5e57;
-                margin: 10px 0;
-            }
-            .theme-message, .content {
-                font-size: 14pt;
-                text-align: center;
-                color: #34495e;
-                margin: 15px 0;
-                line-height: 1.6;
-            }
-            .page-container {
-                padding: 20px;
-                background-color: #fff;
-            }
-        </style>
-        """ % page_size
-        
-        # Check if HTML has proper structure
-        if not html.strip().startswith('<!DOCTYPE') and not html.strip().startswith('<html'):
-            html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                {safe_css}
-                {f'<style type="text/css">{custom_css}</style>' if custom_css else ''}
-            </head>
-            <body>
-                {html}
-            </body>
-            </html>
-            """
-        else:
-            # Insert safe CSS
-            if '<head>' in html:
-                html = html.replace('<head>', f'<head>{safe_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else ''))
-            elif '<html>' in html:
-                html = html.replace('<html>', f'<html><head>{safe_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else '') + '</head>', 1)
-        
-        return html
     
     def _create_pdf_from_html_fallback(self, html: str, page_size: str, output_file: Path) -> Path:
         """
         FALLBACK: Extract content from HTML and style with ReportLab
-        Only used if xhtml2pdf fails
+        Only used if WeasyPrint fails
         """
-        # Parse HTML
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Setup document
         if page_size == "A4":
             page = (210*mm, 297*mm)
         elif page_size == "letter":
@@ -226,7 +129,6 @@ class PDFService:
         story = []
         styles = getSampleStyleSheet()
         
-        # Custom styles
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Title'],
@@ -257,20 +159,16 @@ class PDFService:
             fontName='Helvetica'
         )
         
-        # Extract and build content
         story.append(Spacer(1, 40*mm))
         
-        # Title
         title = soup.find('title') or soup.find(class_='title') or soup.find('h1')
         if title:
             story.append(Paragraph(title.get_text().strip(), title_style))
         
-        # Age range / subtitle
         age_range = soup.find(class_='age-range')
         if age_range:
             story.append(Paragraph(age_range.get_text().strip(), subtitle_style))
         
-        # Main content
         content = soup.find(class_='content') or soup.find(class_='theme-message')
         if content:
             paragraphs = content.find_all('p') if content.find_all('p') else [content]
@@ -280,9 +178,7 @@ class PDFService:
                     story.append(Paragraph(text, content_style))
                     story.append(Spacer(1, 5*mm))
         
-        # Build PDF
         doc.build(story)
-        
         return output_file
     
     def create_from_markdown(
