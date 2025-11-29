@@ -1,23 +1,69 @@
 """
-PDF Generation service - FIXED for WeasyPrint 62.3
-Using correct API syntax - preserves HTML+CSS styling
+PDF Generation Service - Professional Children's Book Template (COMPLETE)
+Beautiful, designed PDFs from simple text input with full customization
 """
 from pathlib import Path
 from typing import List, Optional, Dict
 import markdown
 from reportlab.lib.pagesizes import A4, letter, legal
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch, mm
+from reportlab.lib.colors import HexColor
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
+from reportlab.platypus.flowables import Flowable
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
 from weasyprint import HTML
 import img2pdf
 from PyPDF2 import PdfMerger
 from app.config import settings
 from app.utils import generate_filename
 
+
+class DecorativeBorder(Flowable):
+    """Custom decorative border for children's book pages"""
+    
+    def __init__(self, width, height, border_color="#FFE4B5", bg_color="#FFFEF8"):
+        Flowable.__init__(self)
+        self.width = width
+        self.height = height
+        self.border_color = HexColor(border_color)
+        self.bg_color = HexColor(bg_color)
+    
+    def wrap(self, availWidth, availHeight):
+        """Required method - returns size of flowable"""
+        return (self.width, self.height)
+    
+    def draw(self):
+        """Draw decorative frame"""
+        canvas = self.canv
+        
+        # Background
+        canvas.setFillColor(self.bg_color)
+        canvas.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+        
+        # Decorative border
+        canvas.setStrokeColor(self.border_color)
+        canvas.setLineWidth(3)
+        canvas.roundRect(10, 10, self.width - 20, self.height - 20, 10)
+        
+        # Corner decorations (simple circles)
+        canvas.setFillColor(self.border_color)
+        for x, y in [(20, 20), (self.width - 20, 20), 
+                     (20, self.height - 20), (self.width - 20, self.height - 20)]:
+            canvas.circle(x, y, 8, fill=1, stroke=0)
+
+
 class PDFService:
-    """Local PDF generation service with proper WeasyPrint 62.3 support"""
+    """PDF generation service with professional children's book template"""
+    
+    # Available fonts for children's books (readable, friendly)
+    AVAILABLE_FONTS = {
+        "default": "Helvetica",
+        "friendly": "Helvetica",
+        "classic": "Times-Roman",
+        "modern": "Courier",
+        "playful": "Courier-Bold"
+    }
     
     def __init__(self):
         self.page_sizes = {
@@ -28,41 +74,176 @@ class PDFService:
         self.default_page_size = A4
         self.margin = settings.PDF_MARGIN
     
+    def create_childrens_book(
+        self,
+        text: str,
+        title: Optional[str] = None,
+        font_family: str = "default",
+        theme_color: str = "#2c3e50",
+        page_size: str = "A4",
+        add_border: bool = False,
+        border_color: str = "#FFE4B5",
+        background_color: str = "#FFFEF8"
+    ) -> Path:
+        """
+        Create beautiful children's book PDF from text
+        
+        Args:
+            text: Main content
+            title: Optional title (omit for no title section)
+            font_family: default, friendly, classic, modern, playful
+            theme_color: Hex color for title and accents
+            page_size: A4 (default), letter, legal
+            add_border: Add decorative border around content
+            border_color: Color of decorative border
+            background_color: Background color for bordered pages
+        
+        Returns:
+            Path to generated PDF file
+        """
+        output_file = settings.OUTPUT_DIR / generate_filename("pdf")
+        
+        # Get page size
+        page = self.page_sizes.get(page_size, self.default_page_size)
+        page_width, page_height = page
+        
+        # Setup document
+        doc = SimpleDocTemplate(
+            str(output_file),
+            pagesize=page,
+            rightMargin=25*mm,
+            leftMargin=25*mm,
+            topMargin=30*mm,
+            bottomMargin=30*mm
+        )
+        
+        # Get font (with safe bold handling)
+        font_name = self.AVAILABLE_FONTS.get(font_family, "Helvetica")
+        title_font = self._get_bold_font(font_name)
+        
+        # Create custom styles
+        title_style = ParagraphStyle(
+            'BookTitle',
+            fontName=title_font,
+            fontSize=32,
+            textColor=HexColor(theme_color),
+            alignment=TA_CENTER,
+            spaceAfter=20*mm,
+            spaceBefore=10*mm,
+            leading=40,
+            leftIndent=0,
+            rightIndent=0
+        )
+        
+        body_style = ParagraphStyle(
+            'BookBody',
+            fontName=font_name,
+            fontSize=16,
+            textColor=HexColor('#34495e'),
+            alignment=TA_CENTER,
+            spaceAfter=8*mm,
+            leading=24,
+            leftIndent=0,
+            rightIndent=0,
+            wordWrap='CJK'
+        )
+        
+        # Build content
+        story = []
+        
+        # Add decorative border if requested
+        if add_border:
+            border_width = page_width - 50*mm
+            border_height = page_height - 60*mm
+            story.append(DecorativeBorder(border_width, border_height, border_color, background_color))
+            story.append(Spacer(1, -border_height))  # Overlay content on border
+        
+        # Add top spacing
+        story.append(Spacer(1, 35*mm if not add_border else 40*mm))
+        
+        # Add title if provided
+        if title and title.strip():
+            story.append(Paragraph(title.strip(), title_style))
+        
+        # Add body text with smart alignment
+        paragraphs = self._split_paragraphs(text)
+        
+        for para_text in paragraphs:
+            if para_text:
+                # Smart alignment based on text length
+                style = self._get_paragraph_style(para_text, body_style)
+                story.append(Paragraph(para_text, style))
+                story.append(Spacer(1, 5*mm))
+        
+        # Build PDF
+        doc.build(story)
+        return output_file
+    
     def create_from_text(
         self,
         text: str,
         style: str = "default",
         page_size: str = "A4",
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        font_family: str = "default",
+        theme_color: str = "#2c3e50"
     ) -> Path:
-        """Create PDF from plain text"""
-        output_file = settings.OUTPUT_DIR / generate_filename("pdf")
-        
-        page = self.page_sizes.get(page_size, self.default_page_size)
-        doc = SimpleDocTemplate(
-            str(output_file),
-            pagesize=page,
-            rightMargin=self.margin,
-            leftMargin=self.margin,
-            topMargin=self.margin,
-            bottomMargin=self.margin
+        """
+        Legacy method - redirects to create_childrens_book
+        Kept for backward compatibility
+        """
+        return self.create_childrens_book(
+            text=text,
+            title=title,
+            font_family=font_family,
+            theme_color=theme_color,
+            page_size=page_size,
+            add_border=False
         )
+    
+    def _get_bold_font(self, font_name: str) -> str:
+        """Safely get bold version of font"""
+        base_font = font_name.split('-')[0]
         
-        story = []
-        styles = self._get_styles(style)
+        # Known fonts with bold variants
+        if base_font in ['Helvetica', 'Times', 'Courier']:
+            return f"{base_font}-Bold"
+        elif 'Bold' not in font_name:
+            return f"{font_name}-Bold" if f"{font_name}-Bold" in ['Helvetica-Bold', 'Times-Bold', 'Courier-Bold'] else font_name
         
-        if title:
-            story.append(Paragraph(title, styles['title']))
-            story.append(Spacer(1, 0.3 * inch))
+        return font_name
+    
+    def _split_paragraphs(self, text: str) -> List[str]:
+        """Split text into paragraphs intelligently"""
+        # Try double newline first
+        if '\n\n' in text:
+            paragraphs = text.split('\n\n')
+        else:
+            paragraphs = text.split('\n')
         
-        paragraphs = text.split('\n\n')
-        for para in paragraphs:
-            if para.strip():
-                story.append(Paragraph(para, styles['body']))
-                story.append(Spacer(1, 0.2 * inch))
+        return [p.strip() for p in paragraphs if p.strip()]
+    
+    def _get_paragraph_style(self, text: str, base_style: ParagraphStyle) -> ParagraphStyle:
+        """Get appropriate style based on text length"""
+        text_length = len(text)
         
-        doc.build(story)
-        return output_file
+        if text_length > 150:
+            # Long text - justified
+            return ParagraphStyle(
+                'LongText',
+                parent=base_style,
+                alignment=TA_JUSTIFY
+            )
+        elif text_length > 80:
+            # Medium text - left aligned
+            return ParagraphStyle(
+                'MediumText',
+                parent=base_style,
+                alignment=TA_LEFT
+            )
+        else:
+            # Short text - centered
+            return base_style
     
     def create_from_html(
         self,
@@ -71,8 +252,8 @@ class PDFService:
         css: Optional[str] = None
     ) -> Path:
         """
-        Create PDF from HTML using WeasyPrint 62.3
-        PRESERVES your HTML+CSS styling - NO fallback extraction
+        Create PDF from HTML using WeasyPrint
+        For custom HTML designs when you need full control
         """
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
@@ -90,20 +271,17 @@ class PDFService:
 </body>
 </html>"""
             elif css and '<head>' in html:
-                # Insert CSS into existing HTML
                 html = html.replace('</head>', f'<style>{css}</style></head>')
             
-            # CORRECT WeasyPrint 62.3 API - simple and works
+            # Generate PDF with WeasyPrint
             HTML(string=html).write_pdf(str(output_file))
             
-            # Verify PDF was created
             if not output_file.exists() or output_file.stat().st_size < 100:
-                raise Exception("PDF generation failed - output too small")
+                raise Exception("PDF generation failed")
             
             return output_file
             
         except Exception as e:
-            # If WeasyPrint fails, raise the error - don't use fallback
             raise Exception(f"WeasyPrint PDF generation failed: {str(e)}")
     
     def create_from_markdown(
@@ -189,58 +367,7 @@ class PDFService:
         merger.close()
         
         return output_file
-    
-    def _get_styles(self, style_name: str) -> Dict:
-        """Get paragraph styles based on preset"""
-        base_styles = getSampleStyleSheet()
-        
-        if style_name == "formal":
-            return {
-                'title': ParagraphStyle(
-                    'CustomTitle',
-                    parent=base_styles['Title'],
-                    fontSize=18,
-                    alignment=TA_CENTER,
-                    spaceAfter=12
-                ),
-                'body': ParagraphStyle(
-                    'CustomBody',
-                    parent=base_styles['BodyText'],
-                    fontSize=11,
-                    alignment=TA_JUSTIFY,
-                    fontName='Times-Roman'
-                )
-            }
-        elif style_name == "casual":
-            return {
-                'title': ParagraphStyle(
-                    'CustomTitle',
-                    parent=base_styles['Title'],
-                    fontSize=16,
-                    alignment=TA_LEFT
-                ),
-                'body': ParagraphStyle(
-                    'CustomBody',
-                    parent=base_styles['BodyText'],
-                    fontSize=10,
-                    alignment=TA_LEFT
-                )
-            }
-        elif style_name == "code":
-            return {
-                'title': base_styles['Title'],
-                'body': ParagraphStyle(
-                    'Code',
-                    parent=base_styles['Code'],
-                    fontSize=9,
-                    fontName='Courier'
-                )
-            }
-        else:
-            return {
-                'title': base_styles['Title'],
-                'body': base_styles['BodyText']
-            }
+
 
 # Singleton instance
 pdf_service = PDFService()
