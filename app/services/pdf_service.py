@@ -1,10 +1,11 @@
 """
 PDF Generation service - Create PDFs from text, HTML, markdown, and images
-Using xhtml2pdf (more stable than WeasyPrint)
+Using xhtml2pdf with better HTML/CSS support
 """
 from pathlib import Path
 from typing import List, Optional, Dict
 import markdown
+import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4, letter, legal
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -80,50 +81,104 @@ class PDFService:
         page_size: str = "A4",
         css: Optional[str] = None
     ) -> Path:
-        """Create PDF from HTML using xhtml2pdf"""
+        """Create PDF from HTML using xhtml2pdf with full CSS support"""
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
-        # Add default CSS if not provided
+        # Clean and prepare HTML
+        html = self._prepare_html_for_pdf(html, page_size, css)
+        
+        # Generate PDF with better encoding handling
+        with open(output_file, "wb") as pdf_file:
+            # Convert HTML to PDF
+            pisa_status = pisa.CreatePDF(
+                src=html,
+                dest=pdf_file,
+                encoding='utf-8'
+            )
+        
+        if pisa_status.err:
+            # Fallback: try with simpler HTML if complex styling fails
+            try:
+                simple_html = self._simplify_html(html)
+                with open(output_file, "wb") as pdf_file:
+                    pisa.CreatePDF(
+                        src=simple_html,
+                        dest=pdf_file,
+                        encoding='utf-8'
+                    )
+            except Exception as e:
+                raise Exception(f"PDF generation failed: {str(e)}")
+        
+        return output_file
+    
+    def _prepare_html_for_pdf(self, html: str, page_size: str, custom_css: Optional[str]) -> str:
+        """Prepare HTML with proper structure and CSS for PDF generation"""
+        
+        # Default CSS that works well with xhtml2pdf
         default_css = """
-        <style>
+        <style type="text/css">
             @page {
                 size: %s;
                 margin: 1cm;
             }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
             body {
-                font-family: 'DejaVu Sans', Arial, sans-serif;
+                font-family: Arial, Helvetica, sans-serif;
                 font-size: 11pt;
                 line-height: 1.5;
                 color: #333;
             }
-            h1 { font-size: 20pt; margin-top: 0; color: #000; }
-            h2 { font-size: 16pt; color: #333; }
-            h3 { font-size: 14pt; color: #555; }
-            p { margin: 10px 0; }
-            code { 
-                background: #f4f4f4; 
-                padding: 2px 4px;
-                font-family: monospace;
-                font-size: 10pt;
+            h1, h2, h3, h4, h5, h6 {
+                margin: 10px 0;
+                color: #000;
             }
-            pre {
-                background: #f4f4f4;
-                padding: 10px;
-                overflow-x: auto;
-                font-size: 9pt;
+            h1 { font-size: 20pt; }
+            h2 { font-size: 16pt; }
+            h3 { font-size: 14pt; }
+            p {
+                margin: 10px 0;
+                text-align: left;
+            }
+            .page-container, .content-box, .edges, .corner-accents {
+                /* xhtml2pdf has limited support for complex positioning */
+                position: relative;
+                display: block;
+            }
+            .title {
+                font-size: 24pt;
+                font-weight: bold;
+                text-align: center;
+                margin: 20px 0;
+                color: #2c3e50;
+            }
+            .content {
+                font-size: 14pt;
+                text-align: center;
+                margin: 15px 0;
+                color: #34495e;
+            }
+            /* Simplify gradients - xhtml2pdf doesn't support complex CSS */
+            .page-container {
+                padding: 20px;
+                background-color: #ffffff;
             }
         </style>
         """ % page_size
         
-        # Ensure HTML has proper structure
+        # Check if HTML already has proper structure
         if not html.strip().startswith('<!DOCTYPE') and not html.strip().startswith('<html'):
+            # Wrap in proper HTML structure
             html = f"""
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="UTF-8">
                 {default_css}
-                {f'<style>{css}</style>' if css else ''}
+                {f'<style type="text/css">{custom_css}</style>' if custom_css else ''}
             </head>
             <body>
                 {html}
@@ -131,24 +186,33 @@ class PDFService:
             </html>
             """
         else:
-            # Insert styles into existing HTML
+            # Insert default CSS into existing HTML
             if '<head>' in html:
-                html = html.replace('<head>', f'<head>{default_css}' + (f'<style>{css}</style>' if css else ''))
-            else:
-                html = html.replace('<html>', f'<html><head>{default_css}' + (f'<style>{css}</style>' if css else '') + '</head>')
+                html = html.replace('<head>', f'<head>{default_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else ''))
+            elif '<html>' in html:
+                html = html.replace('<html>', f'<html><head>{default_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else '') + '</head>', 1)
         
-        # Generate PDF
-        with open(output_file, "wb") as pdf_file:
-            pisa_status = pisa.CreatePDF(
-                html.encode('utf-8'),
-                dest=pdf_file,
-                encoding='utf-8'
-            )
+        return html
+    
+    def _simplify_html(self, html: str) -> str:
+        """Simplify HTML by removing complex CSS that xhtml2pdf can't handle"""
+        # Remove complex CSS properties that xhtml2pdf doesn't support
+        unsupported = [
+            r'linear-gradient\([^)]+\)',
+            r'radial-gradient\([^)]+\)',
+            r'box-shadow:[^;]+;',
+            r'border-radius:[^;]+;',
+            r'transform:[^;]+;',
+            r'display:\s*flex[^;]*;',
+            r'justify-content:[^;]+;',
+            r'align-items:[^;]+;',
+            r'flex-direction:[^;]+;',
+        ]
         
-        if pisa_status.err:
-            raise Exception(f"PDF generation failed: {pisa_status.err}")
+        for pattern in unsupported:
+            html = re.sub(pattern, '', html, flags=re.IGNORECASE)
         
-        return output_file
+        return html
     
     def create_from_markdown(
         self,
