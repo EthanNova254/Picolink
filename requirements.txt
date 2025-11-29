@@ -3,7 +3,7 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
 
-# Simple web scraping (NO Crawl4AI - using requests instead)
+# Simple web scraping
 requests==2.31.0
 beautifulsoup4==4.12.3
 lxml==5.1.0
@@ -14,9 +14,9 @@ Pillow==10.2.0
 pdf2image==1.17.0
 pillow-heif==0.15.0
 
-# PDF Generation - Use ReportLab + html5lib for better HTML support
+# PDF Generation - Use LATEST WeasyPrint for modern CSS support
 reportlab==4.0.9
-xhtml2pdf==0.2.15
+weasyprint==62.3
 markdown==3.5.2
 PyPDF2==3.0.1
 img2pdf==0.5.1
