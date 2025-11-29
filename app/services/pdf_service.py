@@ -1,18 +1,18 @@
 """
-PDF Generation service - UPGRADED for modern HTML/CSS
-Using WeasyPrint 62.3 with full CSS3 support
+PDF Generation service - SIMPLIFIED for reliability
+Less fancy, more stable HTML to PDF conversion
 """
 from pathlib import Path
 from typing import List, Optional, Dict
 import markdown
+import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4, letter, legal
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch, mm
+from reportlab.lib.colors import HexColor
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
-from reportlab.lib.colors import HexColor
-from weasyprint import HTML, CSS
 from bs4 import BeautifulSoup
 import img2pdf
 from PyPDF2 import PdfMerger
@@ -20,7 +20,7 @@ from app.config import settings
 from app.utils import generate_filename
 
 class PDFService:
-    """Local PDF generation service with modern CSS support"""
+    """Local PDF generation service - focused on reliability"""
     
     def __init__(self):
         self.page_sizes = {
@@ -74,42 +74,20 @@ class PDFService:
         css: Optional[str] = None
     ) -> Path:
         """
-        Create PDF from HTML - WeasyPrint 62.3 with FULL CSS3 support
-        Supports: flexbox, gradients, transforms, modern CSS!
+        Create PDF from HTML - SIMPLIFIED APPROACH
+        Extracts content and applies clean, reliable styling
+        More predictable results than trying to render complex CSS
         """
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
-        try:
-            # Prepare CSS list
-            stylesheets = []
-            if css:
-                stylesheets.append(CSS(string=css))
-            
-            # Create PDF with WeasyPrint 62.3 (modern API)
-            html_doc = HTML(string=html)
-            html_doc.write_pdf(
-                target=str(output_file),
-                stylesheets=stylesheets
-            )
-            
-            # Check if PDF was created successfully
-            if output_file.exists() and output_file.stat().st_size > 100:
-                return output_file
-            else:
-                raise Exception("PDF generation produced empty file")
-                
-        except Exception as e:
-            print(f"⚠️ WeasyPrint error: {str(e)}")
-            # Fallback to ReportLab extraction
-            return self._create_pdf_from_html_fallback(html, page_size, output_file)
-    
-    def _create_pdf_from_html_fallback(self, html: str, page_size: str, output_file: Path) -> Path:
-        """
-        FALLBACK: Extract content from HTML and style with ReportLab
-        Only used if WeasyPrint fails
-        """
+        # Parse HTML
         soup = BeautifulSoup(html, 'html.parser')
         
+        # Remove unwanted elements
+        for element in soup(['script', 'style', 'meta', 'link', 'svg']):
+            element.decompose()
+        
+        # Setup document
         if page_size == "A4":
             page = (210*mm, 297*mm)
         elif page_size == "letter":
@@ -122,63 +100,156 @@ class PDFService:
             pagesize=page,
             rightMargin=20*mm,
             leftMargin=20*mm,
-            topMargin=20*mm,
-            bottomMargin=20*mm
+            topMargin=30*mm,
+            bottomMargin=30*mm
         )
         
         story = []
         styles = getSampleStyleSheet()
         
+        # Define clean styles
         title_style = ParagraphStyle(
-            'CustomTitle',
+            'PageTitle',
             parent=styles['Title'],
-            fontSize=28,
+            fontSize=32,
             textColor=HexColor('#2c3e50'),
             alignment=TA_CENTER,
-            spaceAfter=12*mm,
-            fontName='Helvetica-Bold'
+            spaceAfter=15*mm,
+            spaceBefore=10*mm,
+            fontName='Helvetica-Bold',
+            leading=38
         )
         
-        subtitle_style = ParagraphStyle(
-            'Subtitle',
-            parent=styles['Normal'],
-            fontSize=16,
-            textColor=HexColor('#34495e'),
+        heading_style = ParagraphStyle(
+            'Heading',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=HexColor('#2c3e50'),
             alignment=TA_CENTER,
             spaceAfter=10*mm,
-            fontName='Helvetica'
+            fontName='Helvetica-Bold',
+            leading=30
         )
         
-        content_style = ParagraphStyle(
-            'Content',
+        subheading_style = ParagraphStyle(
+            'Subheading',
+            parent=styles['Heading2'],
+            fontSize=18,
+            textColor=HexColor('#7b5e57'),
+            alignment=TA_CENTER,
+            spaceAfter=8*mm,
+            fontName='Helvetica',
+            leading=24
+        )
+        
+        body_style = ParagraphStyle(
+            'Body',
             parent=styles['Normal'],
             fontSize=14,
             textColor=HexColor('#34495e'),
             alignment=TA_CENTER,
-            leading=21,
-            fontName='Helvetica'
+            spaceAfter=5*mm,
+            fontName='Helvetica',
+            leading=20
         )
         
-        story.append(Spacer(1, 40*mm))
+        # Add spacing at top
+        story.append(Spacer(1, 30*mm))
         
-        title = soup.find('title') or soup.find(class_='title') or soup.find('h1')
-        if title:
-            story.append(Paragraph(title.get_text().strip(), title_style))
+        # Extract and add content in order
         
-        age_range = soup.find(class_='age-range')
-        if age_range:
-            story.append(Paragraph(age_range.get_text().strip(), subtitle_style))
+        # 1. Check for <title> tag
+        title_tag = soup.find('title')
+        if title_tag and title_tag.string:
+            text = title_tag.string.strip()
+            if text:
+                story.append(Paragraph(text, title_style))
         
-        content = soup.find(class_='content') or soup.find(class_='theme-message')
-        if content:
-            paragraphs = content.find_all('p') if content.find_all('p') else [content]
-            for p in paragraphs:
+        # 2. Check for .title class
+        title_div = soup.find(class_='title')
+        if title_div:
+            text = title_div.get_text().strip()
+            if text and (not title_tag or text != title_tag.string):
+                story.append(Paragraph(text, heading_style))
+        
+        # 3. Check for h1
+        h1 = soup.find('h1')
+        if h1 and not title_div:
+            text = h1.get_text().strip()
+            if text:
+                story.append(Paragraph(text, heading_style))
+        
+        # 4. Check for age-range or subtitle
+        age_div = soup.find(class_='age-range') or soup.find(class_='subtitle')
+        if age_div:
+            text = age_div.get_text().strip()
+            if text:
+                story.append(Paragraph(text, subheading_style))
+        
+        # 5. Check for h2
+        h2 = soup.find('h2')
+        if h2 and not age_div:
+            text = h2.get_text().strip()
+            if text:
+                story.append(Paragraph(text, subheading_style))
+        
+        # 6. Main content
+        content_areas = [
+            soup.find(class_='content'),
+            soup.find(class_='theme-message'),
+            soup.find(class_='message'),
+            soup.find('main'),
+            soup.find(class_='body')
+        ]
+        
+        content_found = False
+        for content_div in content_areas:
+            if content_div:
+                # Get all paragraphs
+                paragraphs = content_div.find_all('p')
+                if paragraphs:
+                    for p in paragraphs:
+                        text = p.get_text().strip()
+                        if text:
+                            story.append(Paragraph(text, body_style))
+                            content_found = True
+                else:
+                    # No <p> tags, get all text
+                    text = content_div.get_text().strip()
+                    if text:
+                        story.append(Paragraph(text, body_style))
+                        content_found = True
+                break
+        
+        # 7. If no structured content found, get all remaining paragraphs
+        if not content_found:
+            all_ps = soup.find_all('p')
+            for p in all_ps:
                 text = p.get_text().strip()
                 if text:
-                    story.append(Paragraph(text, content_style))
-                    story.append(Spacer(1, 5*mm))
+                    story.append(Paragraph(text, body_style))
         
-        doc.build(story)
+        # 8. If still no content, get all text as last resort
+        if len(story) <= 1:  # Only spacer
+            all_text = soup.get_text(separator='\n', strip=True)
+            lines = [line.strip() for line in all_text.split('\n') if line.strip()]
+            for line in lines:
+                if len(line) > 3:  # Ignore very short lines
+                    story.append(Paragraph(line, body_style))
+        
+        # Build PDF
+        try:
+            doc.build(story)
+        except Exception as e:
+            # If build fails, try with even simpler content
+            story = [
+                Spacer(1, 50*mm),
+                Paragraph("Document Generated", title_style),
+                Spacer(1, 10*mm),
+                Paragraph("Content extraction failed. Please check your HTML.", body_style)
+            ]
+            doc.build(story)
+        
         return output_file
     
     def create_from_markdown(
