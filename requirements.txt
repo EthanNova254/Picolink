@@ -14,12 +14,13 @@ Pillow==10.2.0
 pdf2image==1.17.0
 pillow-heif==0.15.0
 
-# PDF Generation - FIXED: Replace WeasyPrint with xhtml2pdf (more stable)
+# PDF Generation - Use ReportLab + html5lib for better HTML support
 reportlab==4.0.9
 xhtml2pdf==0.2.15
 markdown==3.5.2
 PyPDF2==3.0.1
 img2pdf==0.5.1
+html5lib==1.1
 
 # FFmpeg wrapper
 ffmpeg-python==0.2.0
