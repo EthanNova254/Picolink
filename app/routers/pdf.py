@@ -1,12 +1,17 @@
 """
 PDF generation router - Create PDFs from various sources
+UPDATED: Better headers, URL support, base64 support
 """
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
+import base64
+import requests
+from pathlib import Path
 from app.services.pdf_service import pdf_service
-from app.utils import save_upload_file, cleanup_file, IMAGE_TYPES, PDF_TYPES
+from app.utils import save_upload_file, cleanup_file, IMAGE_TYPES, PDF_TYPES, generate_filename
+from app.config import settings
 
 router = APIRouter(prefix="/pdf", tags=["PDF Generation"])
 
@@ -26,45 +31,15 @@ class MarkdownToPDFRequest(BaseModel):
     page_size: str = "A4"
     style: str = "default"
 
+class MergePDFsFromURLRequest(BaseModel):
+    urls: List[HttpUrl]
+
+class MergePDFsFromBase64Request(BaseModel):
+    pdfs: List[str]  # Base64 encoded PDFs
+
 @router.post("/from-text")
 async def create_pdf_from_text(request: TextToPDFRequest):
-    """
-    Create PDF from plain text
-    
-    **Parameters:**
-    - text: Plain text content
-    - title: Optional title for the document
-    - style: default, formal, casual, code
-    - page_size: A4, letter, legal
-    
-    **Styles:**
-    - default: Standard formatting
-    - formal: Times Roman, justified, centered title
-    - casual: Sans-serif, left-aligned
-    - code: Monospace font for code/logs
-    
-    **Use cases:**
-    - Convert notes to PDF
-    - Export logs
-    - Create simple documents
-    
-    **n8n example:**
-    ```json
-    {
-      "method": "POST",
-      "url": "https://your-service.koyeb.app/pdf/from-text",
-      "body": {
-        "text": "Your document content here...",
-        "title": "My Document",
-        "style": "formal",
-        "page_size": "A4"
-      }
-    }
-    ```
-    
-    **Response:**
-    Returns the PDF file directly (application/pdf)
-    """
+    """Create PDF from plain text"""
     try:
         pdf_path = pdf_service.create_from_text(
             request.text,
@@ -76,7 +51,10 @@ async def create_pdf_from_text(request: TextToPDFRequest):
         return FileResponse(
             path=pdf_path,
             media_type="application/pdf",
-            filename=f"document_{pdf_path.name}"
+            headers={
+                "Content-Disposition": f"attachment; filename=document_{pdf_path.name}",
+                "Content-Type": "application/pdf"
+            }
         )
     
     except Exception as e:
@@ -84,37 +62,7 @@ async def create_pdf_from_text(request: TextToPDFRequest):
 
 @router.post("/from-html")
 async def create_pdf_from_html(request: HTMLToPDFRequest):
-    """
-    Create PDF from HTML
-    
-    **Parameters:**
-    - html: HTML content (full document or fragment)
-    - page_size: A4, letter, legal
-    - css: Optional custom CSS
-    
-    **Use cases:**
-    - Convert web pages to PDF
-    - Generate reports from HTML templates
-    - Create styled documents
-    
-    **HTML tips:**
-    - Include inline styles for best results
-    - Use web-safe fonts
-    - Images must be absolute URLs or base64
-    
-    **n8n example:**
-    ```json
-    {
-      "method": "POST",
-      "url": "https://your-service.koyeb.app/pdf/from-html",
-      "body": {
-        "html": "<h1>Title</h1><p>Content</p>",
-        "page_size": "A4",
-        "css": "h1 { color: blue; }"
-      }
-    }
-    ```
-    """
+    """Create PDF from HTML with modern CSS support"""
     try:
         pdf_path = pdf_service.create_from_html(
             request.html,
@@ -125,7 +73,10 @@ async def create_pdf_from_html(request: HTMLToPDFRequest):
         return FileResponse(
             path=pdf_path,
             media_type="application/pdf",
-            filename=f"document_{pdf_path.name}"
+            headers={
+                "Content-Disposition": f"inline; filename=document_{pdf_path.name}",
+                "Content-Type": "application/pdf"
+            }
         )
     
     except Exception as e:
@@ -133,40 +84,7 @@ async def create_pdf_from_html(request: HTMLToPDFRequest):
 
 @router.post("/from-markdown")
 async def create_pdf_from_markdown(request: MarkdownToPDFRequest):
-    """
-    Create PDF from Markdown
-    
-    **Parameters:**
-    - markdown: Markdown content
-    - page_size: A4, letter, legal
-    - style: default, formal, casual
-    
-    **Supported markdown:**
-    - Headers (#, ##, ###)
-    - Lists (-, *, 1.)
-    - Bold (**text**)
-    - Italic (*text*)
-    - Code blocks (```)
-    - Tables
-    - Links
-    
-    **Use cases:**
-    - Convert README files
-    - Export documentation
-    - Create formatted reports
-    
-    **n8n example:**
-    ```json
-    {
-      "method": "POST",
-      "url": "https://your-service.koyeb.app/pdf/from-markdown",
-      "body": {
-        "markdown": "# Title\n\nContent here...",
-        "page_size": "A4"
-      }
-    }
-    ```
-    """
+    """Create PDF from Markdown"""
     try:
         pdf_path = pdf_service.create_from_markdown(
             request.markdown,
@@ -177,7 +95,10 @@ async def create_pdf_from_markdown(request: MarkdownToPDFRequest):
         return FileResponse(
             path=pdf_path,
             media_type="application/pdf",
-            filename=f"document_{pdf_path.name}"
+            headers={
+                "Content-Disposition": f"attachment; filename=document_{pdf_path.name}",
+                "Content-Type": "application/pdf"
+            }
         )
     
     except Exception as e:
@@ -189,34 +110,7 @@ async def create_pdf_from_images(
     page_size: str = Form("A4"),
     fit_to_page: bool = Form(True)
 ):
-    """
-    Create PDF from multiple images
-    
-    **Parameters:**
-    - files: List of image files (JPG, PNG, WEBP, HEIF)
-    - page_size: A4, letter, legal
-    - fit_to_page: Scale images to fit page
-    
-    **Use cases:**
-    - Convert scanned documents
-    - Create photo albums
-    - Combine multiple images
-    
-    **Ordering:**
-    Images are added in the order uploaded
-    
-    **n8n example:**
-    - Use HTTP Request node
-    - Method: POST
-    - Body: Form-Data
-    - Add multiple file fields with name "files"
-    - Add field "page_size" = "A4"
-    - Add field "fit_to_page" = "true"
-    
-    **Limits:**
-    - Max 100 images per request
-    - Each image max 100MB
-    """
+    """Create PDF from multiple images"""
     if len(files) > 100:
         raise HTTPException(
             status_code=400,
@@ -226,12 +120,10 @@ async def create_pdf_from_images(
     saved_paths = []
     
     try:
-        # Save all uploaded images
         for file in files:
             file_path, mime = await save_upload_file(file, IMAGE_TYPES)
             saved_paths.append(file_path)
         
-        # Create PDF
         pdf_path = pdf_service.create_from_images(
             saved_paths,
             page_size=page_size,
@@ -241,14 +133,16 @@ async def create_pdf_from_images(
         return FileResponse(
             path=pdf_path,
             media_type="application/pdf",
-            filename=f"images_{pdf_path.name}"
+            headers={
+                "Content-Disposition": f"attachment; filename=images_{pdf_path.name}",
+                "Content-Type": "application/pdf"
+            }
         )
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
     finally:
-        # Cleanup uploaded images
         for path in saved_paths:
             cleanup_file(path)
 
@@ -256,24 +150,7 @@ async def create_pdf_from_images(
 async def merge_pdfs(files: List[UploadFile] = File(...)):
     """
     Merge multiple PDFs into one
-    
-    **Parameters:**
-    - files: List of PDF files to merge
-    
-    **Use cases:**
-    - Combine multiple documents
-    - Merge reports
-    - Consolidate files
-    
-    **Ordering:**
-    PDFs are merged in upload order
-    
-    **Limits:**
-    - Max 50 PDFs per request
-    
-    **n8n example:**
-    - Upload multiple PDF files with name "files"
-    - Response is the merged PDF
+    Upload PDF files directly
     """
     if len(files) > 50:
         raise HTTPException(
@@ -284,10 +161,69 @@ async def merge_pdfs(files: List[UploadFile] = File(...)):
     saved_paths = []
     
     try:
-        # Save all uploaded PDFs
         for file in files:
             file_path, mime = await save_upload_file(file, PDF_TYPES)
             saved_paths.append(file_path)
+        
+        pdf_path = pdf_service.merge_pdfs(saved_paths)
+        
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"inline; filename=merged_{pdf_path.name}",
+                "Content-Type": "application/pdf"
+            }
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
+        for path in saved_paths:
+            cleanup_file(path)
+
+@router.post("/merge-from-urls")
+async def merge_pdfs_from_urls(request: MergePDFsFromURLRequest):
+    """
+    Merge PDFs from URLs
+    
+    Example:
+    {
+      "urls": [
+        "https://example.com/doc1.pdf",
+        "https://example.com/doc2.pdf"
+      ]
+    }
+    """
+    if len(request.urls) > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Too many URLs. Max 50 PDFs per request"
+        )
+    
+    saved_paths = []
+    
+    try:
+        # Download PDFs from URLs
+        for url in request.urls:
+            response = requests.get(str(url), timeout=30)
+            response.raise_for_status()
+            
+            # Verify it's a PDF
+            content_type = response.headers.get('content-type', '')
+            if 'pdf' not in content_type.lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"URL {url} does not return a PDF"
+                )
+            
+            # Save temporarily
+            temp_path = settings.UPLOAD_DIR / generate_filename("pdf")
+            with open(temp_path, 'wb') as f:
+                f.write(response.content)
+            
+            saved_paths.append(temp_path)
         
         # Merge PDFs
         pdf_path = pdf_service.merge_pdfs(saved_paths)
@@ -295,13 +231,84 @@ async def merge_pdfs(files: List[UploadFile] = File(...)):
         return FileResponse(
             path=pdf_path,
             media_type="application/pdf",
-            filename=f"merged_{pdf_path.name}"
+            headers={
+                "Content-Disposition": f"inline; filename=merged_{pdf_path.name}",
+                "Content-Type": "application/pdf"
+            }
         )
     
+    except requests.RequestException as e:
+        raise HTTPException(status_code=400, detail=f"Failed to download PDF: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
     finally:
-        # Cleanup uploaded PDFs
+        for path in saved_paths:
+            cleanup_file(path)
+
+@router.post("/merge-from-base64")
+async def merge_pdfs_from_base64(request: MergePDFsFromBase64Request):
+    """
+    Merge PDFs from base64-encoded strings
+    
+    Example:
+    {
+      "pdfs": [
+        "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC...",
+        "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC..."
+      ]
+    }
+    """
+    if len(request.pdfs) > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Too many PDFs. Max 50 per request"
+        )
+    
+    saved_paths = []
+    
+    try:
+        # Decode and save PDFs
+        for idx, pdf_b64 in enumerate(request.pdfs):
+            try:
+                pdf_bytes = base64.b64decode(pdf_b64)
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid base64 at index {idx}"
+                )
+            
+            # Verify PDF header
+            if not pdf_bytes.startswith(b'%PDF'):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Data at index {idx} is not a PDF"
+                )
+            
+            # Save temporarily
+            temp_path = settings.UPLOAD_DIR / generate_filename("pdf")
+            with open(temp_path, 'wb') as f:
+                f.write(pdf_bytes)
+            
+            saved_paths.append(temp_path)
+        
+        # Merge PDFs
+        pdf_path = pdf_service.merge_pdfs(saved_paths)
+        
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"inline; filename=merged_{pdf_path.name}",
+                "Content-Type": "application/pdf"
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    finally:
         for path in saved_paths:
             cleanup_file(path)
