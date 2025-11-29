@@ -1,6 +1,6 @@
 """
 PDF Generation service - Create PDFs from text, HTML, markdown, and images
-Using xhtml2pdf with better HTML/CSS support
+SMART FALLBACK: Tries to preserve HTML+CSS, falls back to extraction if needed
 """
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -9,10 +9,12 @@ import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4, letter, legal
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
+from reportlab.lib.units import inch, mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image as RLImage
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
+from reportlab.lib.colors import HexColor
 from xhtml2pdf import pisa
+from bs4 import BeautifulSoup
 import img2pdf
 from PyPDF2 import PdfMerger
 from app.config import settings
@@ -81,50 +83,50 @@ class PDFService:
         page_size: str = "A4",
         css: Optional[str] = None
     ) -> Path:
-        """Create PDF from HTML using xhtml2pdf with full CSS support"""
+        """
+        Create PDF from HTML - SMART FALLBACK APPROACH
+        1. First: Try to render HTML+CSS with xhtml2pdf (preserves your styling)
+        2. Fallback: If that fails, extract content and style with ReportLab
+        """
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
-        # Clean and prepare HTML
-        html = self._prepare_html_for_pdf(html, page_size, css)
+        # Prepare HTML with proper structure
+        prepared_html = self._prepare_html_for_pdf(html, page_size, css)
         
-        # Generate PDF with better encoding handling
-        with open(output_file, "wb") as pdf_file:
-            # Convert HTML to PDF
-            pisa_status = pisa.CreatePDF(
-                src=html,
-                dest=pdf_file,
-                encoding='utf-8'
-            )
-        
-        if pisa_status.err:
-            # Fallback: try with simpler HTML if complex styling fails
-            try:
-                simple_html = self._simplify_html(html)
-                with open(output_file, "wb") as pdf_file:
-                    pisa.CreatePDF(
-                        src=simple_html,
-                        dest=pdf_file,
-                        encoding='utf-8'
-                    )
-            except Exception as e:
-                raise Exception(f"PDF generation failed: {str(e)}")
-        
-        return output_file
+        # ATTEMPT 1: Try xhtml2pdf (preserves your HTML+CSS)
+        try:
+            with open(output_file, "wb") as pdf_file:
+                pisa_status = pisa.CreatePDF(
+                    src=prepared_html,
+                    dest=pdf_file,
+                    encoding='utf-8'
+                )
+            
+            # Check if PDF was created successfully and has content
+            if output_file.exists() and output_file.stat().st_size > 1000:
+                # PDF created successfully with content
+                print(f"✅ PDF created with xhtml2pdf (preserved HTML+CSS)")
+                return output_file
+            else:
+                # PDF too small or failed
+                print(f"⚠️ xhtml2pdf produced small/empty PDF, trying fallback...")
+                raise Exception("PDF too small")
+                
+        except Exception as e:
+            print(f"⚠️ xhtml2pdf failed: {str(e)}, using fallback renderer...")
+            
+            # ATTEMPT 2: Fallback to ReportLab extraction (clean styling)
+            return self._create_pdf_from_html_fallback(html, page_size, output_file)
     
     def _prepare_html_for_pdf(self, html: str, page_size: str, custom_css: Optional[str]) -> str:
-        """Prepare HTML with proper structure and CSS for PDF generation"""
+        """Prepare HTML with proper structure for xhtml2pdf"""
         
-        # Default CSS that works well with xhtml2pdf
-        default_css = """
+        # Simplified CSS that xhtml2pdf can handle better
+        safe_css = """
         <style type="text/css">
             @page {
                 size: %s;
-                margin: 1cm;
-            }
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
+                margin: 2cm;
             }
             body {
                 font-family: Arial, Helvetica, sans-serif;
@@ -132,52 +134,54 @@ class PDFService:
                 line-height: 1.5;
                 color: #333;
             }
-            h1, h2, h3, h4, h5, h6 {
+            h1, h2, h3 {
+                color: #2c3e50;
+                text-align: center;
                 margin: 10px 0;
-                color: #000;
             }
-            h1 { font-size: 20pt; }
-            h2 { font-size: 16pt; }
+            h1 { font-size: 24pt; }
+            h2 { font-size: 18pt; }
             h3 { font-size: 14pt; }
             p {
                 margin: 10px 0;
-                text-align: left;
-            }
-            .page-container, .content-box, .edges, .corner-accents {
-                /* xhtml2pdf has limited support for complex positioning */
-                position: relative;
-                display: block;
-            }
-            .title {
-                font-size: 24pt;
-                font-weight: bold;
                 text-align: center;
-                margin: 20px 0;
-                color: #2c3e50;
-            }
-            .content {
-                font-size: 14pt;
-                text-align: center;
-                margin: 15px 0;
                 color: #34495e;
             }
-            /* Simplify gradients - xhtml2pdf doesn't support complex CSS */
+            .title {
+                font-size: 28pt;
+                font-weight: bold;
+                text-align: center;
+                color: #2c3e50;
+                margin: 20px 0;
+            }
+            .age-range {
+                font-size: 14pt;
+                text-align: center;
+                color: #7b5e57;
+                margin: 10px 0;
+            }
+            .theme-message, .content {
+                font-size: 14pt;
+                text-align: center;
+                color: #34495e;
+                margin: 15px 0;
+                line-height: 1.6;
+            }
             .page-container {
                 padding: 20px;
-                background-color: #ffffff;
+                background-color: #fff;
             }
         </style>
         """ % page_size
         
-        # Check if HTML already has proper structure
+        # Check if HTML has proper structure
         if not html.strip().startswith('<!DOCTYPE') and not html.strip().startswith('<html'):
-            # Wrap in proper HTML structure
             html = f"""
             <!DOCTYPE html>
             <html>
             <head>
                 <meta charset="UTF-8">
-                {default_css}
+                {safe_css}
                 {f'<style type="text/css">{custom_css}</style>' if custom_css else ''}
             </head>
             <body>
@@ -186,33 +190,100 @@ class PDFService:
             </html>
             """
         else:
-            # Insert default CSS into existing HTML
+            # Insert safe CSS
             if '<head>' in html:
-                html = html.replace('<head>', f'<head>{default_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else ''))
+                html = html.replace('<head>', f'<head>{safe_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else ''))
             elif '<html>' in html:
-                html = html.replace('<html>', f'<html><head>{default_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else '') + '</head>', 1)
+                html = html.replace('<html>', f'<html><head>{safe_css}' + (f'<style type="text/css">{custom_css}</style>' if custom_css else '') + '</head>', 1)
         
         return html
     
-    def _simplify_html(self, html: str) -> str:
-        """Simplify HTML by removing complex CSS that xhtml2pdf can't handle"""
-        # Remove complex CSS properties that xhtml2pdf doesn't support
-        unsupported = [
-            r'linear-gradient\([^)]+\)',
-            r'radial-gradient\([^)]+\)',
-            r'box-shadow:[^;]+;',
-            r'border-radius:[^;]+;',
-            r'transform:[^;]+;',
-            r'display:\s*flex[^;]*;',
-            r'justify-content:[^;]+;',
-            r'align-items:[^;]+;',
-            r'flex-direction:[^;]+;',
-        ]
+    def _create_pdf_from_html_fallback(self, html: str, page_size: str, output_file: Path) -> Path:
+        """
+        FALLBACK: Extract content from HTML and style with ReportLab
+        Only used if xhtml2pdf fails
+        """
+        # Parse HTML
+        soup = BeautifulSoup(html, 'html.parser')
         
-        for pattern in unsupported:
-            html = re.sub(pattern, '', html, flags=re.IGNORECASE)
+        # Setup document
+        if page_size == "A4":
+            page = (210*mm, 297*mm)
+        elif page_size == "letter":
+            page = letter
+        else:
+            page = legal
         
-        return html
+        doc = SimpleDocTemplate(
+            str(output_file),
+            pagesize=page,
+            rightMargin=20*mm,
+            leftMargin=20*mm,
+            topMargin=20*mm,
+            bottomMargin=20*mm
+        )
+        
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Title'],
+            fontSize=28,
+            textColor=HexColor('#2c3e50'),
+            alignment=TA_CENTER,
+            spaceAfter=12*mm,
+            fontName='Helvetica-Bold'
+        )
+        
+        subtitle_style = ParagraphStyle(
+            'Subtitle',
+            parent=styles['Normal'],
+            fontSize=16,
+            textColor=HexColor('#34495e'),
+            alignment=TA_CENTER,
+            spaceAfter=10*mm,
+            fontName='Helvetica'
+        )
+        
+        content_style = ParagraphStyle(
+            'Content',
+            parent=styles['Normal'],
+            fontSize=14,
+            textColor=HexColor('#34495e'),
+            alignment=TA_CENTER,
+            leading=21,
+            fontName='Helvetica'
+        )
+        
+        # Extract and build content
+        story.append(Spacer(1, 40*mm))
+        
+        # Title
+        title = soup.find('title') or soup.find(class_='title') or soup.find('h1')
+        if title:
+            story.append(Paragraph(title.get_text().strip(), title_style))
+        
+        # Age range / subtitle
+        age_range = soup.find(class_='age-range')
+        if age_range:
+            story.append(Paragraph(age_range.get_text().strip(), subtitle_style))
+        
+        # Main content
+        content = soup.find(class_='content') or soup.find(class_='theme-message')
+        if content:
+            paragraphs = content.find_all('p') if content.find_all('p') else [content]
+            for p in paragraphs:
+                text = p.get_text().strip()
+                if text:
+                    story.append(Paragraph(text, content_style))
+                    story.append(Spacer(1, 5*mm))
+        
+        # Build PDF
+        doc.build(story)
+        
+        return output_file
     
     def create_from_markdown(
         self,
@@ -221,13 +292,11 @@ class PDFService:
         style: str = "default"
     ) -> Path:
         """Convert markdown to PDF"""
-        # Convert markdown to HTML
         html = markdown.markdown(
             md_text,
             extensions=['extra', 'codehilite', 'tables', 'toc']
         )
         
-        # Wrap in basic HTML structure
         full_html = f"""
         <!DOCTYPE html>
         <html>
@@ -252,11 +321,9 @@ class PDFService:
         output_file = settings.OUTPUT_DIR / generate_filename("pdf")
         
         if fit_to_page:
-            # Use img2pdf for better quality
             with open(output_file, "wb") as f:
                 f.write(img2pdf.convert([str(p) for p in image_paths]))
         else:
-            # Use ReportLab for more control
             page = self.page_sizes.get(page_size, self.default_page_size)
             doc = SimpleDocTemplate(str(output_file), pagesize=page)
             
@@ -264,7 +331,6 @@ class PDFService:
             for img_path in image_paths:
                 img = RLImage(str(img_path))
                 
-                # Scale to fit page
                 img_width, img_height = img.imageWidth, img.imageHeight
                 page_width, page_height = page
                 
@@ -342,7 +408,7 @@ class PDFService:
                     fontName='Courier'
                 )
             }
-        else:  # default
+        else:
             return {
                 'title': base_styles['Title'],
                 'body': base_styles['BodyText']
